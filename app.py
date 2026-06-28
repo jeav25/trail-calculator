@@ -18,6 +18,8 @@ BASE_URL             = os.environ.get('BASE_URL', 'http://localhost:5000')
 MOUNTAIN_TYPES  = {'TrailRun', 'Run', 'Hike', 'Walk'}
 MIN_ACT_DPLUS   = 200
 MIN_CLIMB_DPLUS = 150
+REAL_RATES = {'s': 88, 'm': 282, 'l': 150, 'xl': 176}
+MIN_BUCKET  = 20   # sesiones minimas para confiar en el promedio calculado
 
 # -- Analisis ----------------------------------------------------------
 
@@ -66,11 +68,16 @@ def analyze(activities):
     def avg(lst, default):
         return round(sum(lst) / len(lst)) if lst else default
 
+    def best_rate(lst, cat):
+        if len(lst) >= MIN_BUCKET:
+            return avg(lst, REAL_RATES[cat])
+        return REAL_RATES[cat]
+
     rates = {
-        's':  avg(buckets['s'],  900),
-        'm':  avg(buckets['m'],  850),
-        'l':  avg(buckets['l'],  750),
-        'xl': avg(buckets['xl'], 630),
+        's':  best_rate(buckets['s'],  's'),
+        'm':  best_rate(buckets['m'],  'm'),
+        'l':  best_rate(buckets['l'],  'l'),
+        'xl': best_rate(buckets['xl'], 'xl'),
         'n_s':  len(buckets['s']),
         'n_m':  len(buckets['m']),
         'n_l':  len(buckets['l']),
