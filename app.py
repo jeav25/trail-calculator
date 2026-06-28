@@ -404,7 +404,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
   {% endif %}
   <div class="header-text">
     <h1>{{ athlete.firstname }} {{ athlete.lastname }}</h1>
-    <p>Calculadora personalizada con tus tasas reales</p>
+    <p>Calculadora de ascenso &middot; Estima tus tiempos de subida</p>
   </div>
 </div>
 
