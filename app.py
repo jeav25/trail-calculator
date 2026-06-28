@@ -60,7 +60,7 @@ def analyze(activities):
         stats['dplus']    += dplus
         stats['sessions'] += 1
         if sport == 'TrailRun': stats['trail'] += 1
-        if time_h > 0:
+        if dplus >= 60 and time_h > 0:
             buckets[get_cat(dist_km)].append(round(dplus / time_h))
 
     def avg(lst, default):
