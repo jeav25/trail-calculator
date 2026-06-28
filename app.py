@@ -18,8 +18,7 @@ BASE_URL             = os.environ.get('BASE_URL', 'http://localhost:5000')
 MOUNTAIN_TYPES  = {'TrailRun', 'Run', 'Hike', 'Walk'}
 MIN_ACT_DPLUS   = 200
 MIN_CLIMB_DPLUS = 150
-REAL_RATES = {'s': 88, 'm': 282, 'l': 150, 'xl': 176}
-MIN_BUCKET  = 20   # sesiones minimas para confiar en el promedio calculado
+REAL_RATES = {'s': 500, 'm': 480, 'l': 450, 'xl': 420}  # fallback si no hay segmentos GPS en esa categoria
 
 # -- Analisis ----------------------------------------------------------
 
@@ -68,16 +67,11 @@ def analyze(activities):
     def avg(lst, default):
         return round(sum(lst) / len(lst)) if lst else default
 
-    def best_rate(lst, cat):
-        if len(lst) >= MIN_BUCKET:
-            return avg(lst, REAL_RATES[cat])
-        return REAL_RATES[cat]
-
     rates = {
-        's':  best_rate(buckets['s'],  's'),
-        'm':  best_rate(buckets['m'],  'm'),
-        'l':  best_rate(buckets['l'],  'l'),
-        'xl': best_rate(buckets['xl'], 'xl'),
+        's':  avg(buckets['s'],  REAL_RATES['s']),
+        'm':  avg(buckets['m'],  REAL_RATES['m']),
+        'l':  avg(buckets['l'],  REAL_RATES['l']),
+        'xl': avg(buckets['xl'], REAL_RATES['xl']),
         'n_s':  len(buckets['s']),
         'n_m':  len(buckets['m']),
         'n_l':  len(buckets['l']),
@@ -87,6 +81,25 @@ def analyze(activities):
     stats['dplus'] = round(stats['dplus'])
     return rates, stats
 
+
+def analyze_from_segments(segments):
+    """Calcula tasas D+/h por categoria usando segmentos GPS (subida pura)."""
+    buckets = defaultdict(list)
+    for seg in segments:
+        cat = get_cat(seg['dist_km'])
+        buckets[cat].append(seg['rate'])
+    def avg(lst, default):
+        return round(sum(lst) / len(lst)) if lst else default
+    return {
+        's':   avg(buckets['s'],   REAL_RATES['s']),
+        'm':   avg(buckets['m'],   REAL_RATES['m']),
+        'l':   avg(buckets['l'],   REAL_RATES['l']),
+        'xl':  avg(buckets['xl'],  REAL_RATES['xl']),
+        'n_s': len(buckets['s']),
+        'n_m': len(buckets['m']),
+        'n_l': len(buckets['l']),
+        'n_xl': len(buckets['xl']),
+    }
 
 def fmt_time(seconds):
     h = int(seconds // 3600)
@@ -172,7 +185,7 @@ def _fetch_one_stream(token, act):
         return None
 
 
-def fetch_segments(token, activities, max_acts=7):
+def fetch_segments(token, activities, max_acts=30):
     mountain = [
         a for a in activities
         if (a.get('sport_type') or a.get('type', '')) in MOUNTAIN_TYPES
@@ -202,7 +215,7 @@ def fetch_segments(token, activities, max_acts=7):
                 })
 
     segments.sort(key=lambda s: s['dplus'], reverse=True)
-    return segments[:12]
+    return segments
 
 # -- Templates ---------------------------------------------------------
 
@@ -602,8 +615,10 @@ def auth_callback():
     athlete = data.get('athlete', {})
 
     activities = fetch_activities(token)
-    rates, stats = analyze(activities)
-    segments = fetch_segments(token, activities)
+    _, stats = analyze(activities)
+    all_segs = fetch_segments(token, activities)
+    rates = analyze_from_segments(all_segs)
+    segments = all_segs[:12]
 
     session['athlete'] = {
         'firstname': athlete.get('firstname', 'Atleta'),
