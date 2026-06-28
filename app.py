@@ -405,6 +405,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
   <div class="header-text">
     <h1>{{ athlete.firstname }} {{ athlete.lastname }}</h1>
     <p>Calculadora de ascenso &middot; Estima tus tiempos de subida</p>
+<p style="font-size:11px;color:var(--sub);margin-top:2px">Solo para tramos de subida</p>
   </div>
 </div>
 
