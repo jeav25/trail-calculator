@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""
+Trail Calculator — Strava OAuth + análisis D+/h + calculadora personalizada
+Desplegable en Railway / Render / Replit con 3 variables de entorno.
+"""
+import os, requests, json
+from flask import Flask, redirect, request, session, render_template_string, url_for
+from collections import defaultdict
+
+app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'cambia-esto-en-produccion')
+
+STRAVA_CLIENT_ID     = os.environ.get('STRAVA_CLIENT_ID', '')
+STRAVA_CLIENT_SECRET = os.environ.get('STRAVA_CLIENT_SECRET', '')
+BASE_URL             = os.environ.get('BASE_URL', 'http://localhost:5000')
+
+# ── Análisis ──────────────────────────────────────────────────
+
+def get_cat(km):
+    if km < 2:  return 's'
+    if km < 5:  return 'm'
+    if km < 8:  return 'l'
+    return 'xl'
+
+def fetch_activities(token, max_pages=6):
+    acts = []
+    for page in range(1, max_pages + 1):
+        r = requests.get(
+            'https://www.strava.com/api/v3/athlete/activities',
+            headers={'Authorization': f'Bearer {token}'},
+            params={'per_page': 100, 'page': page},
+            timeout=15
+        )
+        if r.status_code != 200: break
+        batch = r.json()
+        if not batch: break
+        acts.extend(batch)
+    return acts
+
+def analyze(activities):
+    buckets = defaultdict(list)
+    stats = {'km': 0, 'dplus': 0, 'sessions': 0, 'trail': 0}
+
+    for a in activities:
+        sport = a.get('sport_type') or a.get('type', '')
+        if sport not in ('Run', 'TrailRun'): continue
+
+        dist_m = a.get('distance', 0)
+        time_s = a.get('moving_time', 0)
+        dplus  = a.get('total_elevation_gain', 0)
+        if dist_m < 500 or time_s < 60: continue
+
+        dist_km = dist_m / 1000
+        time_h  = time_s / 3600
+
+        stats['km']       += dist_km
+        stats['dplus']    += dplus
+        stats['sessions'] += 1
+        if sport == 'TrailRun': stats['trail'] += 1
+
+        if dplus >= 60 and time_h > 0:
+            buckets[get_cat(dist_km)].append(round(dplus / time_h))
+
+    def avg(lst, default):
+        return round(sum(lst) / len(lst)) if lst else default
+
+    rates = {
+        's':  avg(buckets['s'],  900),
+        'm':  avg(buckets['m'],  850),
+        'l':  avg(buckets['l'],  750),
+        'xl': avg(buckets['xl'], 630),
+        'n_s':  len(buckets['s']),
+        'n_m':  len(buckets['m']),
+        'n_l':  len(buckets['l']),
+        'n_xl': len(buckets['xl']),
+    }
+
+    stats['km']    = round(stats['km'])
+    stats['dplus'] = round(stats['dplus'])
+    return rates, stats
+
+# ── Templates ─────────────────────────────────────────────────
+
+INDEX = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Trail Calculator</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f1117;--card:#1a1d27;--border:#2d3148;--text:#f0f2ff;
+      --muted:#8892b0;--green:#10b981;--orange:#fc4c02;--radius:14px;
+      --font:system-ui,-apple-system,sans-serif}
+body{background:var(--bg);color:var(--text);font-family:var(--font);
+     min-height:100vh;display:flex;flex-direction:column;align-items:center;
+     justify-content:center;padding:24px;text-align:center}
+.logo{font-size:42px;margin-bottom:16px}
+h1{font-size:28px;font-weight:700;margin-bottom:8px}
+.sub{font-size:15px;color:var(--muted);line-height:1.6;max-width:340px;margin:0 auto 36px}
+.btn-strava{display:inline-flex;align-items:center;gap:12px;background:var(--orange);
+            color:#fff;font-size:16px;font-weight:600;padding:16px 28px;
+            border-radius:var(--radius);text-decoration:none;
+            border:none;cursor:pointer;font-family:var(--font)}
+.btn-strava:active{opacity:.85}
+.strava-logo{width:24px;height:24px;fill:#fff}
+.steps{margin-top:48px;text-align:left;max-width:320px;width:100%}
+.step{display:flex;gap:14px;align-items:flex-start;margin-bottom:20px}
+.step-num{background:var(--card);border:1px solid var(--border);border-radius:50%;
+          width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+          font-size:13px;font-weight:600;flex-shrink:0;color:var(--green)}
+.step-text{font-size:14px;color:var(--muted);line-height:1.5;padding-top:5px}
+.step-text strong{color:var(--text)}
+.footer{margin-top:48px;font-size:11px;color:#3d4466}
+{% if error %}
+.error{background:#2d1a1a;border:1px solid #7f1d1d;border-radius:10px;
+       color:#fca5a5;font-size:13px;padding:12px 16px;margin-bottom:24px;max-width:340px}
+{% endif %}
+</style>
+</head>
+<body>
+<div class="logo">⛰️</div>
+<h1>Trail Calculator</h1>
+<p class="sub">Conectá tu Strava y obtené una calculadora de tiempos personalizada con tus tasas reales de ascenso.</p>
+{% if error %}
+<div class="error">{{ error }}</div>
+{% endif %}
+<a class="btn-strava" href="{{ auth_url }}">
+  <svg class="strava-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/>
+  </svg>
+  Conectar con Strava
+</a>
+<div class="steps">
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-text"><strong>Autorizás</strong> el acceso de lectura a tus actividades en Strava.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-text"><strong>Analizamos</strong> tus runs y trail runs: D+/h por categoría de subida.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-text"><strong>Obtenés</strong> tu calculadora personalizada para estimar tiempos de ascenso.</div>
+  </div>
+</div>
+<div class="footer">Solo lectura · Sin guardar datos · Desconectá desde Strava cuando quieras</div>
+</body>
+</html>"""
+
+ANALYZING = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="2;url=/analyzing">
+<title>Analizando...</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1117;color:#f0f2ff;font-family:system-ui,sans-serif;
+     min-height:100vh;display:flex;align-items:center;justify-content:center;
+     flex-direction:column;text-align:center;padding:24px}
+.spinner{width:56px;height:56px;border:4px solid #2d3148;
+         border-top-color:#10b981;border-radius:50%;
+         animation:spin 1s linear infinite;margin-bottom:24px}
+@keyframes spin{to{transform:rotate(360deg)}}
+h2{font-size:20px;font-weight:600;margin-bottom:8px}
+p{font-size:14px;color:#8892b0}
+</style>
+</head>
+<body>
+<div class="spinner"></div>
+<h2>Analizando tus entrenamientos</h2>
+<p>Descargando actividades de Strava...</p>
+</body>
+</html>"""
+
+ERROR_PAGE = """<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Error</title>
+<style>
+body{background:#0f1117;color:#f0f2ff;font-family:system-ui,sans-serif;
+     min-height:100vh;display:flex;align-items:center;justify-content:center;
+     flex-direction:column;text-align:center;padding:24px}
+.box{background:#1a1d27;border:1px solid #7f1d1d;border-radius:14px;
+     padding:24px;max-width:360px}
+h2{color:#f87171;margin-bottom:12px}
+p{font-size:14px;color:#8892b0;line-height:1.6}
+a{color:#60a5fa;font-size:14px;display:block;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="box">
+<h2>Algo salió mal</h2>
+<p>{{ msg }}</p>
+<a href="/">← Volver al inicio</a>
+</div>
+</body>
+</html>"""
+
+
+RESULT = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Tu calculadora · Trail Calculator</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0f1117;--card:#1a1d27;--card2:#22263a;--border:#2d3148;
+      --text:#f0f2ff;--muted:#8892b0;--sub:#5c6589;
+      --red:#ff4d6d;--amber:#f59e0b;--green:#10b981;--blue:#60a5fa;
+      --orange:#fc4c02;--radius:14px;--font:system-ui,-apple-system,sans-serif}
+body{background:var(--bg);color:var(--text);font-family:var(--font);
+     padding:0 0 48px;max-width:520px;margin:0 auto}
+.header{background:var(--card);padding:16px;border-bottom:1px solid var(--border);
+        display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
+.avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;
+        border:2px solid var(--border)}
+.avatar-fallback{width:40px;height:40px;border-radius:50%;background:var(--card2);
+                 border:2px solid var(--border);display:flex;align-items:center;
+                 justify-content:center;font-size:16px;font-weight:700;color:var(--green)}
+.header-text h1{font-size:15px;font-weight:600}
+.header-text p{font-size:12px;color:var(--muted);margin-top:2px}
+.section{padding:16px 14px 0}
+.stat-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+           padding:12px 10px;text-align:center}
+.stat-val{font-size:20px;font-weight:700;color:var(--green)}
+.stat-label{font-size:10px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+.section-title{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.6px;
+               text-transform:uppercase;margin:20px 0 10px}
+.rate-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.rate-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+           padding:14px 12px;text-align:center}
+.rate-label{font-size:11px;color:var(--muted);margin-bottom:6px;line-height:1.3}
+.rate-val{font-size:26px;font-weight:700;margin-bottom:2px}
+.rate-count{font-size:10px;color:var(--sub)}
+.calc-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+           padding:18px 16px;margin-top:12px}
+.slider-block{margin-bottom:18px}
+.slider-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.slider-name{font-size:13px;color:var(--muted)}
+.slider-val{font-size:18px;font-weight:600}
+input[type=range]{-webkit-appearance:none;width:100%;height:6px;background:var(--border);
+                  border-radius:3px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;
+  border-radius:50%;background:var(--blue);border:3px solid var(--bg);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
+  background:var(--blue);border:3px solid var(--bg);cursor:pointer}
+.mode-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:18px 0 16px}
+.mode-btn{padding:11px 4px;border-radius:10px;border:1.5px solid var(--border);
+          background:transparent;color:var(--muted);font-size:13px;font-weight:500;
+          cursor:pointer;transition:.15s;font-family:var(--font)}
+.mode-btn.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.results-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.result-card{background:var(--card2);border-radius:12px;padding:14px 8px;text-align:center}
+.result-label{font-size:10px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.result-val{font-size:22px;font-weight:700}
+.result-val.green{color:var(--green)}
+.ref-note{font-size:11px;color:var(--sub);text-align:center;margin-top:12px;min-height:16px;line-height:1.4}
+.badge{display:inline-block;background:#0d2d22;color:var(--green);border:1px solid #1a5c3a;
+       font-size:10px;padding:2px 8px;border-radius:20px;margin-top:4px}
+.footer{text-align:center;font-size:11px;color:#3d4466;margin-top:32px}
+.footer a{color:#5c6589;text-decoration:none}
+</style>
+</head>
+<body>
+
+<div class="header">
+  {% if athlete.profile %}
+  <img class="avatar" src="{{ athlete.profile }}" alt="{{ athlete.firstname }}">
+  {% else %}
+  <div class="avatar-fallback">{{ athlete.firstname[0] }}</div>
+  {% endif %}
+  <div class="header-text">
+    <h1>{{ athlete.firstname }} {{ athlete.lastname }}</h1>
+    <p>Calculadora personalizada con tus tasas reales</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Actividades analizadas</div>
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="stat-val">{{ stats.sessions }}</div>
+      <div class="stat-label">Sesiones</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val">{{ stats.km }} km</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val">{{ (stats.dplus / 1000) | round(1) }}K m</div>
+      <div class="stat-label">D+ total</div>
+    </div>
+  </div>
+
+  <div class="section-title">Tus tasas reales de ascenso</div>
+  <div class="rate-grid">
+    <div class="rate-card">
+      <div class="rate-label">Subidas cortas<br>&lt;2 km</div>
+      <div class="rate-val" style="color:var(--red)">{{ rates.s }}</div>
+      <div class="rate-count">m/h · {{ rates.n_s }} sesiones</div>
+      {% if rates.n_s < 3 %}<div class="badge">pocos datos</div>{% endif %}
+    </div>
+    <div class="rate-card">
+      <div class="rate-label">Subidas medias<br>2–5 km</div>
+      <div class="rate-val" style="color:var(--amber)">{{ rates.m }}</div>
+      <div class="rate-count">m/h · {{ rates.n_m }} sesiones</div>
+      {% if rates.n_m < 3 %}<div class="badge">pocos datos</div>{% endif %}
+    </div>
+    <div class="rate-card">
+      <div class="rate-label">Subidas largas<br>5–8 km</div>
+      <div class="rate-val" style="color:var(--green)">{{ rates.l }}</div>
+      <div class="rate-count">m/h · {{ rates.n_l }} sesiones</div>
+      {% if rates.n_l < 3 %}<div class="badge">pocos datos</div>{% endif %}
+    </div>
+    <div class="rate-card">
+      <div class="rate-label">Muy largas<br>8+ km</div>
+      <div class="rate-val" style="color:var(--blue)">{{ rates.xl }}</div>
+      <div class="rate-count">m/h · {{ rates.n_xl }} sesiones</div>
+      {% if rates.n_xl < 3 %}<div class="badge">pocos datos</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="section-title">Calculadora</div>
+  <div class="calc-card">
+    <div class="slider-block">
+      <div class="slider-top">
+        <span class="slider-name">Desnivel positivo</span>
+        <span class="slider-val" id="dplus-out">900 m</span>
+      </div>
+      <input type="range" id="dplus" min="50" max="3000" step="50" value="900">
+    </div>
+    <div class="slider-block" style="margin-bottom:0">
+      <div class="slider-top">
+        <span class="slider-name">Distancia horizontal</span>
+        <span class="slider-val" id="dist-out">5.0 km</span>
+      </div>
+      <input type="range" id="dist" min="0.5" max="20" step="0.5" value="5">
+    </div>
+    <div class="mode-row">
+      <button class="mode-btn active" onclick="setMode('race',this)">Carrera</button>
+      <button class="mode-btn" onclick="setMode('train',this)">Entrena.</button>
+      <button class="mode-btn" onclick="setMode('easy',this)">Suave/Z2</button>
+    </div>
+    <div class="results-grid">
+      <div class="result-card">
+        <div class="result-label">Pendiente</div>
+        <div class="result-val" id="grade-out">18%</div>
+      </div>
+      <div class="result-card">
+        <div class="result-label">D+/hora</div>
+        <div class="result-val" id="rate-out">760 m/h</div>
+      </div>
+      <div class="result-card">
+        <div class="result-label">Tiempo est.</div>
+        <div class="result-val green" id="time-out">1h 11m</div>
+      </div>
+    </div>
+    <div class="ref-note" id="ref-note"></div>
+  </div>
+
+  <div class="footer">
+    <a href="/">← Nueva consulta</a> &nbsp;·&nbsp;
+    Trail Calculator · Solo lectura de Strava
+  </div>
+</div>
+
+<script>
+const RATES = { s:{{ rates.s }}, m:{{ rates.m }}, l:{{ rates.l }}, xl:{{ rates.xl }} };
+const MULT  = { race:1.0, train:0.82, easy:0.67 };
+let mode = 'race';
+function cat(d){ return d<2?'s':d<5?'m':d<8?'l':'xl'; }
+function fmt(mins){
+  const h=Math.floor(mins/60), m=Math.round(mins%60);
+  return h>0?`${h}h ${m}m`:`${m}m`;
+}
+function setMode(m,btn){
+  mode=m;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  update();
+}
+function update(){
+  const dp   = parseInt(document.getElementById('dplus').value);
+  const dist = parseFloat(document.getElementById('dist').value);
+  document.getElementById('dplus-out').textContent = dp+' m';
+  document.getElementById('dist-out').textContent  = dist.toFixed(1)+' km';
+  const grade = Math.round(dp/dist);
+  const rate  = Math.round(RATES[cat(dist)]*MULT[mode]);
+  const tMins = (dp/rate)*60;
+  document.getElementById('grade-out').textContent = grade+'%';
+  document.getElementById('rate-out').textContent  = rate+' m/h';
+  document.getElementById('time-out').textContent  = fmt(tMins);
+  const modeLabel = {race:'en carrera',train:'en entrenamiento',easy:'en Z2/suave'}[mode];
+  document.getElementById('ref-note').textContent =
+    `${dp}m de D+ en ${dist}km ${modeLabel} → ${fmt(tMins)}`;
+}
+document.getElementById('dplus').addEventListener('input',update);
+document.getElementById('dist').addEventListener('input',update);
+update();
+</script>
+</body>
+</html>"""
+
+# ── Routes ────────────────────────────────────────────────────
+
+@app.route('/')
+def index():
+    error = request.args.get('error')
+    auth_url = (
+        f"https://www.strava.com/oauth/authorize"
+        f"?client_id={STRAVA_CLIENT_ID}"
+        f"&redirect_uri={BASE_URL}/auth/callback"
+        f"&response_type=code"
+        f"&scope=activity:read_all"
+        f"&approval_prompt=auto"
+    )
+    return render_template_string(INDEX, auth_url=auth_url, error=error)
+
+@app.route('/auth/callback')
+def auth_callback():
+    code  = request.args.get('code')
+    error = request.args.get('error')
+
+    if error or not code:
+        return redirect('/?error=Acceso+denegado+o+cancelado')
+
+    # Exchange code for token
+    resp = requests.post('https://www.strava.com/oauth/token', data={
+        'client_id':     STRAVA_CLIENT_ID,
+        'client_secret': STRAVA_CLIENT_SECRET,
+        'code':          code,
+        'grant_type':    'authorization_code',
+    }, timeout=15)
+
+    if resp.status_code != 200:
+        return render_template_string(ERROR_PAGE,
+            msg='No se pudo completar la autenticación con Strava. Intentá de nuevo.')
+
+    data    = resp.json()
+    token   = data.get('access_token')
+    athlete = data.get('athlete', {})
+
+    # Fetch + analyze activities
+    activities = fetch_activities(token)
+    rates, stats = analyze(activities)
+
+    # Store in session
+    session['athlete'] = {
+        'firstname': athlete.get('firstname', 'Atleta'),
+        'lastname':  athlete.get('lastname', ''),
+        'profile':   athlete.get('profile_medium') or athlete.get('profile', ''),
+    }
+    session['rates'] = rates
+    session['stats'] = stats
+
+    return redirect('/resultado')
+
+@app.route('/resultado')
+def resultado():
+    if 'rates' not in session:
+        return redirect('/')
+    return render_template_string(
+        RESULT,
+        athlete=session['athlete'],
+        rates=session['rates'],
+        stats=session['stats'],
+    )
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
