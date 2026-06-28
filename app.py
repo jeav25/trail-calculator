@@ -547,7 +547,7 @@ function update(){
   const dist = parseFloat(document.getElementById('dist').value);
   document.getElementById('dplus-out').textContent = dp+' m';
   document.getElementById('dist-out').textContent  = dist.toFixed(1)+' km';
-  const grade = Math.round(dp/dist);
+  const grade = Math.round(dp / (dist * 10));
   const rate  = Math.round(RATES[cat(dist)]*MULT[mode]);
   const tMins = (dp/rate)*60;
   document.getElementById('grade-out').textContent = grade+'%';
