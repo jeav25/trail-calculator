@@ -3,9 +3,10 @@
 Trail Calculator — Strava OAuth + análisis D+/h + calculadora personalizada
 Desplegable en Railway / Render / Replit con 3 variables de entorno.
 """
-import os, requests, json, sys
+import os, requests, json
 from flask import Flask, redirect, request, session, render_template_string, url_for
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'cambia-esto-en-produccion')
@@ -14,7 +15,10 @@ STRAVA_CLIENT_ID     = os.environ.get('STRAVA_CLIENT_ID', '')
 STRAVA_CLIENT_SECRET = os.environ.get('STRAVA_CLIENT_SECRET', '')
 BASE_URL             = os.environ.get('BASE_URL', 'http://localhost:5000')
 
-print(f"[STARTUP] CLIENT_ID={STRAVA_CLIENT_ID} BASE_URL={BASE_URL}", file=sys.stderr)
+# ── Constantes ────────────────────────────────────────────────
+MOUNTAIN_TYPES   = {'TrailRun', 'Run', 'Hike', 'Walk'}
+MIN_ACT_DPLUS    = 200   # m — mínimo D+ para considerar actividad de montaña
+MIN_CLIMB_DPLUS  = 150   # m — mínimo D+ para mostrar un tramo
 
 # ── Análisis ──────────────────────────────────────────────────
 
@@ -81,6 +85,120 @@ def analyze(activities):
     stats['dplus'] = round(stats['dplus'])
     return rates, stats
 
+
+def fmt_time(seconds):
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    return f'{h}h {m:02d}m' if h > 0 else f'{m}m'
+
+
+def detect_climbs(altitudes, times):
+    """Detecta subidas significativas en un stream de altitud/tiempo."""
+    n = len(altitudes)
+    if n < 20:
+        return []
+
+    # Suavizado con ventana de 5 puntos para reducir ruido GPS
+    w = 5
+    smooth = []
+    for i in range(n):
+        lo, hi = max(0, i - w//2), min(n, i + w//2 + 1)
+        smooth.append(sum(altitudes[lo:hi]) / (hi - lo))
+
+    DROP_TOL = 25  # m de bajada permitidos dentro de una subida
+    climbs = []
+    i = 0
+    while i < n - 1:
+        if smooth[i+1] <= smooth[i]:
+            i += 1
+            continue
+        # Inicio de subida
+        start_i   = i
+        start_alt = smooth[i]
+        max_alt   = smooth[i]
+        max_i     = i
+        cur_drop  = 0
+
+        j = i + 1
+        while j < n:
+            delta = smooth[j] - smooth[j-1]
+            if delta > 0:
+                if smooth[j] > max_alt:
+                    max_alt = smooth[j]
+                    max_i   = j
+                cur_drop = 0
+            else:
+                cur_drop += -delta
+                if cur_drop > DROP_TOL:
+                    break
+            j += 1
+
+        gain = max_alt - start_alt
+        if gain >= MIN_CLIMB_DPLUS:
+            dt = times[max_i] - times[start_i]
+            if dt > 60:
+                rate = round(gain / (dt / 3600))
+                if 100 <= rate <= 3000:  # sanity check
+                    climbs.append({'dplus': round(gain), 'time_s': int(dt), 'rate': rate})
+        i = max_i + 1
+
+    return climbs
+
+
+def _fetch_one_stream(token, act):
+    """Descarga el stream de una actividad. Retorna (act, climbs) o None."""
+    try:
+        r = requests.get(
+            f'https://www.strava.com/api/v3/activities/{act["id"]}/streams',
+            headers={'Authorization': f'Bearer {token}'},
+            params={'keys': 'altitude,time', 'key_by_type': 'true', 'resolution': 'medium'},
+            timeout=12
+        )
+        if r.status_code != 200:
+            return None
+        streams  = r.json()
+        alt_data = streams.get('altitude', {}).get('data', [])
+        t_data   = streams.get('time',     {}).get('data', [])
+        if len(alt_data) < 20 or len(alt_data) != len(t_data):
+            return None
+        climbs = detect_climbs(alt_data, t_data)
+        return (act, climbs)
+    except Exception:
+        return None
+
+
+def fetch_segments(token, activities, max_acts=7):
+    """Filtra actividades de montaña y detecta tramos de subida, en paralelo."""
+    mountain = [
+        a for a in activities
+        if (a.get('sport_type') or a.get('type', '')) in MOUNTAIN_TYPES
+        and a.get('total_elevation_gain', 0) >= MIN_ACT_DPLUS
+    ]
+    # Priorizar las de mayor D+
+    mountain = sorted(mountain, key=lambda a: a.get('total_elevation_gain', 0), reverse=True)[:max_acts]
+
+    segments = []
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = {ex.submit(_fetch_one_stream, token, act): act for act in mountain}
+        for fut in as_completed(futures, timeout=25):
+            result = fut.result()
+            if not result:
+                continue
+            act, climbs = result
+            name = act.get('name', 'Actividad')
+            date = act.get('start_date_local', '')[:10]
+            for c in climbs:
+                segments.append({
+                    'name':     name,
+                    'date':     date,
+                    'dplus':    c['dplus'],
+                    'time_fmt': fmt_time(c['time_s']),
+                    'rate':     c['rate'],
+                })
+
+    segments.sort(key=lambda s: s['dplus'], reverse=True)
+    return segments[:10]
+
 # ── Templates ─────────────────────────────────────────────────
 
 INDEX = """<!DOCTYPE html>
@@ -121,9 +239,9 @@ h1{font-size:28px;font-weight:700;margin-bottom:8px}
 </style>
 </head>
 <body>
-<div class="logo">&#x26F0;&#xFE0F;</div>
+<div class="logo">⛰️</div>
 <h1>Trail Calculator</h1>
-<p class="sub">Conecta tu Strava y obtene una calculadora de tiempos personalizada con tus tasas reales de ascenso.</p>
+<p class="sub">Conectá tu Strava y obtené una calculadora de tiempos personalizada con tus tasas reales de ascenso.</p>
 {% if error %}
 <div class="error">{{ error }}</div>
 {% endif %}
@@ -136,18 +254,18 @@ h1{font-size:28px;font-weight:700;margin-bottom:8px}
 <div class="steps">
   <div class="step">
     <div class="step-num">1</div>
-    <div class="step-text"><strong>Autorizas</strong> el acceso de lectura a tus actividades en Strava.</div>
+    <div class="step-text"><strong>Autorizás</strong> el acceso de lectura a tus actividades en Strava.</div>
   </div>
   <div class="step">
     <div class="step-num">2</div>
-    <div class="step-text"><strong>Analizamos</strong> tus runs y trail runs: D+/h por categoria de subida.</div>
+    <div class="step-text"><strong>Analizamos</strong> tus runs y trail runs: D+/h por categoría de subida.</div>
   </div>
   <div class="step">
     <div class="step-num">3</div>
-    <div class="step-text"><strong>Obtenes</strong> tu calculadora personalizada para estimar tiempos de ascenso.</div>
+    <div class="step-text"><strong>Obtenés</strong> tu calculadora personalizada para estimar tiempos de ascenso.</div>
   </div>
 </div>
-<div class="footer">Solo lectura - Sin guardar datos - Desconecta desde Strava cuando quieras</div>
+<div class="footer">Solo lectura · Sin guardar datos · Desconectá desde Strava cuando quieras</div>
 </body>
 </html>"""
 
@@ -187,17 +305,17 @@ body{background:#0f1117;color:#f0f2ff;font-family:system-ui,sans-serif;
      min-height:100vh;display:flex;align-items:center;justify-content:center;
      flex-direction:column;text-align:center;padding:24px}
 .box{background:#1a1d27;border:1px solid #7f1d1d;border-radius:14px;
-     padding:24px;max-width:400px}
+     padding:24px;max-width:360px}
 h2{color:#f87171;margin-bottom:12px}
-p{font-size:13px;color:#8892b0;line-height:1.6;word-break:break-word}
+p{font-size:14px;color:#8892b0;line-height:1.6}
 a{color:#60a5fa;font-size:14px;display:block;margin-top:20px}
 </style>
 </head>
 <body>
 <div class="box">
-<h2>Algo salio mal</h2>
+<h2>Algo salió mal</h2>
 <p>{{ msg }}</p>
-<a href="/">&#x2190; Volver al inicio</a>
+<a href="/">← Volver al inicio</a>
 </div>
 </body>
 </html>"""
@@ -208,7 +326,7 @@ RESULT = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Tu calculadora - Trail Calculator</title>
+<title>Tu calculadora · Trail Calculator</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--bg:#0f1117;--card:#1a1d27;--card2:#22263a;--border:#2d3148;
@@ -265,6 +383,17 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
 .ref-note{font-size:11px;color:var(--sub);text-align:center;margin-top:12px;min-height:16px;line-height:1.4}
 .badge{display:inline-block;background:#0d2d22;color:var(--green);border:1px solid #1a5c3a;
        font-size:10px;padding:2px 8px;border-radius:20px;margin-top:4px}
+.seg-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+          padding:12px 14px;margin-bottom:8px}
+.seg-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.seg-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;
+          text-overflow:ellipsis;max-width:68%}
+.seg-date{font-size:11px;color:var(--sub);flex-shrink:0}
+.seg-pills{display:flex;gap:8px}
+.seg-pill{background:var(--card2);border-radius:8px;padding:5px 10px;
+          font-size:12px;text-align:center;flex:1}
+.seg-pill-val{font-weight:700;font-size:15px}
+.seg-pill-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
 .footer{text-align:center;font-size:11px;color:#3d4466;margin-top:32px}
 .footer a{color:#5c6589;text-decoration:none}
 </style>
@@ -305,28 +434,54 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
     <div class="rate-card">
       <div class="rate-label">Subidas cortas<br>&lt;2 km</div>
       <div class="rate-val" style="color:var(--red)">{{ rates.s }}</div>
-      <div class="rate-count">m/h - {{ rates.n_s }} sesiones</div>
+      <div class="rate-count">m/h · {{ rates.n_s }} sesiones</div>
       {% if rates.n_s < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
     <div class="rate-card">
-      <div class="rate-label">Subidas medias<br>2-5 km</div>
+      <div class="rate-label">Subidas medias<br>2–5 km</div>
       <div class="rate-val" style="color:var(--amber)">{{ rates.m }}</div>
-      <div class="rate-count">m/h - {{ rates.n_m }} sesiones</div>
+      <div class="rate-count">m/h · {{ rates.n_m }} sesiones</div>
       {% if rates.n_m < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
     <div class="rate-card">
-      <div class="rate-label">Subidas largas<br>5-8 km</div>
+      <div class="rate-label">Subidas largas<br>5–8 km</div>
       <div class="rate-val" style="color:var(--green)">{{ rates.l }}</div>
-      <div class="rate-count">m/h - {{ rates.n_l }} sesiones</div>
+      <div class="rate-count">m/h · {{ rates.n_l }} sesiones</div>
       {% if rates.n_l < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
     <div class="rate-card">
       <div class="rate-label">Muy largas<br>8+ km</div>
       <div class="rate-val" style="color:var(--blue)">{{ rates.xl }}</div>
-      <div class="rate-count">m/h - {{ rates.n_xl }} sesiones</div>
+      <div class="rate-count">m/h · {{ rates.n_xl }} sesiones</div>
       {% if rates.n_xl < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
   </div>
+
+  {% if segments %}
+  <div class="section-title">Tramos detectados</div>
+  {% for seg in segments %}
+  <div class="seg-card">
+    <div class="seg-header">
+      <span class="seg-name">{{ seg.name }}</span>
+      <span class="seg-date">{{ seg.date }}</span>
+    </div>
+    <div class="seg-pills">
+      <div class="seg-pill">
+        <div class="seg-pill-val" style="color:var(--green)">↑ {{ seg.dplus }}m</div>
+        <div class="seg-pill-lbl">D+</div>
+      </div>
+      <div class="seg-pill">
+        <div class="seg-pill-val">{{ seg.time_fmt }}</div>
+        <div class="seg-pill-lbl">Tiempo</div>
+      </div>
+      <div class="seg-pill">
+        <div class="seg-pill-val" style="color:var(--amber)">{{ seg.rate }}</div>
+        <div class="seg-pill-lbl">m/h</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
 
   <div class="section-title">Calculadora</div>
   <div class="calc-card">
@@ -367,8 +522,8 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
   </div>
 
   <div class="footer">
-    <a href="/">&#x2190; Nueva consulta</a> &nbsp;&#xB7;&nbsp;
-    Trail Calculator - Solo lectura de Strava
+    <a href="/">← Nueva consulta</a> &nbsp;·&nbsp;
+    Trail Calculator · Solo lectura de Strava
   </div>
 </div>
 
@@ -400,7 +555,7 @@ function update(){
   document.getElementById('time-out').textContent  = fmt(tMins);
   const modeLabel = {race:'en carrera',train:'en entrenamiento',easy:'en Z2/suave'}[mode];
   document.getElementById('ref-note').textContent =
-    `${dp}m de D+ en ${dist}km ${modeLabel} -> ${fmt(tMins)}`;
+    `${dp}m de D+ en ${dist}km ${modeLabel} → ${fmt(tMins)}`;
 }
 document.getElementById('dplus').addEventListener('input',update);
 document.getElementById('dist').addEventListener('input',update);
@@ -441,11 +596,12 @@ def auth_callback():
     }, timeout=15)
 
     if resp.status_code != 200:
-        print(f"[ERROR] Strava token exchange: {resp.status_code} - {resp.text}", file=sys.stderr, flush=True)
+        import sys
+        print(f"[ERROR] Strava token exchange failed: {resp.status_code} — {resp.text}", file=sys.stderr)
         try:
-            err_detail = resp.json().get('message', resp.text[:300])
+            err_detail = resp.json().get('message', resp.text[:200])
         except Exception:
-            err_detail = resp.text[:300]
+            err_detail = resp.text[:200]
         return render_template_string(ERROR_PAGE,
             msg=f'Error Strava ({resp.status_code}): {err_detail}')
 
@@ -456,6 +612,7 @@ def auth_callback():
     # Fetch + analyze activities
     activities = fetch_activities(token)
     rates, stats = analyze(activities)
+    segments = fetch_segments(token, activities)
 
     # Store in session
     session['athlete'] = {
@@ -463,8 +620,9 @@ def auth_callback():
         'lastname':  athlete.get('lastname', ''),
         'profile':   athlete.get('profile_medium') or athlete.get('profile', ''),
     }
-    session['rates'] = rates
-    session['stats'] = stats
+    session['rates']    = rates
+    session['stats']    = stats
+    session['segments'] = segments
 
     return redirect('/resultado')
 
@@ -477,6 +635,7 @@ def resultado():
         athlete=session['athlete'],
         rates=session['rates'],
         stats=session['stats'],
+        segments=session.get('segments', []),
     )
 
 if __name__ == '__main__':
