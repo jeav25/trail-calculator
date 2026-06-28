@@ -27,7 +27,7 @@ def get_cat(km):
     if km < 8:  return 'l'
     return 'xl'
 
-def fetch_activities(token, max_pages=6):
+def fetch_activities(token, max_pages=10):
     acts = []
     for page in range(1, max_pages + 1):
         r = requests.get(
@@ -42,12 +42,14 @@ def fetch_activities(token, max_pages=6):
         acts.extend(batch)
     return acts
 
+ANALYZE_TYPES = {'Run', 'TrailRun', 'Hike', 'Walk'}
+
 def analyze(activities):
     buckets = defaultdict(list)
     stats = {'km': 0, 'dplus': 0, 'sessions': 0, 'trail': 0}
     for a in activities:
         sport = a.get('sport_type') or a.get('type', '')
-        if sport not in ('Run', 'TrailRun'): continue
+        if sport not in ANALYZE_TYPES: continue
         dist_m = a.get('distance', 0)
         time_s = a.get('moving_time', 0)
         dplus  = a.get('total_elevation_gain', 0)
@@ -58,7 +60,7 @@ def analyze(activities):
         stats['dplus']    += dplus
         stats['sessions'] += 1
         if sport == 'TrailRun': stats['trail'] += 1
-        if dplus >= 60 and time_h > 0:
+        if time_h > 0:
             buckets[get_cat(dist_km)].append(round(dplus / time_h))
 
     def avg(lst, default):
@@ -327,6 +329,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);
 .rate-count{font-size:10px;color:var(--sub)}
 .badge{display:inline-block;background:#0d2d22;color:var(--green);border:1px solid #1a5c3a;
        font-size:10px;padding:2px 8px;border-radius:20px;margin-top:4px}
+/* Tabla de segmentos */
 .seg-wrap{overflow-x:auto;margin-top:0}
 .seg-table{width:100%;border-collapse:collapse;font-size:12px;min-width:420px}
 .seg-table th{font-size:10px;font-weight:600;color:var(--sub);text-transform:uppercase;
@@ -343,6 +346,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);
 .rate-warm{color:var(--amber)}
 .rate-cool{color:var(--green)}
 .rate-cold{color:var(--blue)}
+/* Calculadora */
 .calc-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
            padding:18px 16px;margin-top:12px}
 .slider-block{margin-bottom:18px}
