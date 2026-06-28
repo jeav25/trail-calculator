@@ -3,7 +3,7 @@
 Trail Calculator — Strava OAuth + análisis D+/h + calculadora personalizada
 Desplegable en Railway / Render / Replit con 3 variables de entorno.
 """
-import os, requests, json
+import os, requests, json, sys
 from flask import Flask, redirect, request, session, render_template_string, url_for
 from collections import defaultdict
 
@@ -13,6 +13,8 @@ app.secret_key = os.environ.get('SECRET_KEY', 'cambia-esto-en-produccion')
 STRAVA_CLIENT_ID     = os.environ.get('STRAVA_CLIENT_ID', '')
 STRAVA_CLIENT_SECRET = os.environ.get('STRAVA_CLIENT_SECRET', '')
 BASE_URL             = os.environ.get('BASE_URL', 'http://localhost:5000')
+
+print(f"[STARTUP] CLIENT_ID={STRAVA_CLIENT_ID} BASE_URL={BASE_URL}", file=sys.stderr)
 
 # ── Análisis ──────────────────────────────────────────────────
 
@@ -119,9 +121,9 @@ h1{font-size:28px;font-weight:700;margin-bottom:8px}
 </style>
 </head>
 <body>
-<div class="logo">⛰️</div>
+<div class="logo">&#x26F0;&#xFE0F;</div>
 <h1>Trail Calculator</h1>
-<p class="sub">Conectá tu Strava y obtené una calculadora de tiempos personalizada con tus tasas reales de ascenso.</p>
+<p class="sub">Conecta tu Strava y obtene una calculadora de tiempos personalizada con tus tasas reales de ascenso.</p>
 {% if error %}
 <div class="error">{{ error }}</div>
 {% endif %}
@@ -134,18 +136,18 @@ h1{font-size:28px;font-weight:700;margin-bottom:8px}
 <div class="steps">
   <div class="step">
     <div class="step-num">1</div>
-    <div class="step-text"><strong>Autorizás</strong> el acceso de lectura a tus actividades en Strava.</div>
+    <div class="step-text"><strong>Autorizas</strong> el acceso de lectura a tus actividades en Strava.</div>
   </div>
   <div class="step">
     <div class="step-num">2</div>
-    <div class="step-text"><strong>Analizamos</strong> tus runs y trail runs: D+/h por categoría de subida.</div>
+    <div class="step-text"><strong>Analizamos</strong> tus runs y trail runs: D+/h por categoria de subida.</div>
   </div>
   <div class="step">
     <div class="step-num">3</div>
-    <div class="step-text"><strong>Obtenés</strong> tu calculadora personalizada para estimar tiempos de ascenso.</div>
+    <div class="step-text"><strong>Obtenes</strong> tu calculadora personalizada para estimar tiempos de ascenso.</div>
   </div>
 </div>
-<div class="footer">Solo lectura · Sin guardar datos · Desconectá desde Strava cuando quieras</div>
+<div class="footer">Solo lectura - Sin guardar datos - Desconecta desde Strava cuando quieras</div>
 </body>
 </html>"""
 
@@ -185,17 +187,17 @@ body{background:#0f1117;color:#f0f2ff;font-family:system-ui,sans-serif;
      min-height:100vh;display:flex;align-items:center;justify-content:center;
      flex-direction:column;text-align:center;padding:24px}
 .box{background:#1a1d27;border:1px solid #7f1d1d;border-radius:14px;
-     padding:24px;max-width:360px}
+     padding:24px;max-width:400px}
 h2{color:#f87171;margin-bottom:12px}
-p{font-size:14px;color:#8892b0;line-height:1.6}
+p{font-size:13px;color:#8892b0;line-height:1.6;word-break:break-word}
 a{color:#60a5fa;font-size:14px;display:block;margin-top:20px}
 </style>
 </head>
 <body>
 <div class="box">
-<h2>Algo salió mal</h2>
+<h2>Algo salio mal</h2>
 <p>{{ msg }}</p>
-<a href="/">← Volver al inicio</a>
+<a href="/">&#x2190; Volver al inicio</a>
 </div>
 </body>
 </html>"""
@@ -206,7 +208,7 @@ RESULT = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Tu calculadora · Trail Calculator</title>
+<title>Tu calculadora - Trail Calculator</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--bg:#0f1117;--card:#1a1d27;--card2:#22263a;--border:#2d3148;
@@ -303,25 +305,25 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
     <div class="rate-card">
       <div class="rate-label">Subidas cortas<br>&lt;2 km</div>
       <div class="rate-val" style="color:var(--red)">{{ rates.s }}</div>
-      <div class="rate-count">m/h · {{ rates.n_s }} sesiones</div>
+      <div class="rate-count">m/h - {{ rates.n_s }} sesiones</div>
       {% if rates.n_s < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
     <div class="rate-card">
-      <div class="rate-label">Subidas medias<br>2–5 km</div>
+      <div class="rate-label">Subidas medias<br>2-5 km</div>
       <div class="rate-val" style="color:var(--amber)">{{ rates.m }}</div>
-      <div class="rate-count">m/h · {{ rates.n_m }} sesiones</div>
+      <div class="rate-count">m/h - {{ rates.n_m }} sesiones</div>
       {% if rates.n_m < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
     <div class="rate-card">
-      <div class="rate-label">Subidas largas<br>5–8 km</div>
+      <div class="rate-label">Subidas largas<br>5-8 km</div>
       <div class="rate-val" style="color:var(--green)">{{ rates.l }}</div>
-      <div class="rate-count">m/h · {{ rates.n_l }} sesiones</div>
+      <div class="rate-count">m/h - {{ rates.n_l }} sesiones</div>
       {% if rates.n_l < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
     <div class="rate-card">
       <div class="rate-label">Muy largas<br>8+ km</div>
       <div class="rate-val" style="color:var(--blue)">{{ rates.xl }}</div>
-      <div class="rate-count">m/h · {{ rates.n_xl }} sesiones</div>
+      <div class="rate-count">m/h - {{ rates.n_xl }} sesiones</div>
       {% if rates.n_xl < 3 %}<div class="badge">pocos datos</div>{% endif %}
     </div>
   </div>
@@ -365,8 +367,8 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
   </div>
 
   <div class="footer">
-    <a href="/">← Nueva consulta</a> &nbsp;·&nbsp;
-    Trail Calculator · Solo lectura de Strava
+    <a href="/">&#x2190; Nueva consulta</a> &nbsp;&#xB7;&nbsp;
+    Trail Calculator - Solo lectura de Strava
   </div>
 </div>
 
@@ -398,7 +400,7 @@ function update(){
   document.getElementById('time-out').textContent  = fmt(tMins);
   const modeLabel = {race:'en carrera',train:'en entrenamiento',easy:'en Z2/suave'}[mode];
   document.getElementById('ref-note').textContent =
-    `${dp}m de D+ en ${dist}km ${modeLabel} → ${fmt(tMins)}`;
+    `${dp}m de D+ en ${dist}km ${modeLabel} -> ${fmt(tMins)}`;
 }
 document.getElementById('dplus').addEventListener('input',update);
 document.getElementById('dist').addEventListener('input',update);
@@ -439,8 +441,13 @@ def auth_callback():
     }, timeout=15)
 
     if resp.status_code != 200:
+        print(f"[ERROR] Strava token exchange: {resp.status_code} - {resp.text}", file=sys.stderr, flush=True)
+        try:
+            err_detail = resp.json().get('message', resp.text[:300])
+        except Exception:
+            err_detail = resp.text[:300]
         return render_template_string(ERROR_PAGE,
-            msg='No se pudo completar la autenticación con Strava. Intentá de nuevo.')
+            msg=f'Error Strava ({resp.status_code}): {err_detail}')
 
     data    = resp.json()
     token   = data.get('access_token')
