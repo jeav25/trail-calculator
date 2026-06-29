@@ -3,7 +3,7 @@
 Trail Calculator -- Strava OAuth + analisis D+/h + calculadora personalizada
 Desplegable en Railway / Render / Replit con 3 variables de entorno.
 """
-import os, requests, json
+import os, requests, json, datetime
 from flask import Flask, redirect, request, session, render_template_string, url_for
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -101,6 +101,30 @@ def analyze_from_segments(segments):
         'n_xl': len(buckets['xl']),
     }
 
+def compute_history(activities):
+    quarters = defaultdict(list)
+    for a in activities:
+        sport = a.get('sport_type') or a.get('type', '')
+        if sport not in ANALYZE_TYPES: continue
+        dplus  = a.get('total_elevation_gain', 0)
+        time_s = a.get('moving_time', 0)
+        date_str = a.get('start_date_local', '')[:10]
+        if not date_str or dplus < 100 or time_s < 600: continue
+        try:
+            d = datetime.date.fromisoformat(date_str)
+            q = f"{d.year}-Q{(d.month-1)//3 + 1}"
+            rate = round(dplus / (time_s / 3600))
+            if 50 <= rate <= 1500:
+                quarters[q].append(rate)
+        except Exception:
+            continue
+    result = []
+    for q in sorted(quarters):
+        rates = quarters[q]
+        if len(rates) >= 2:
+            result.append({'period': q, 'rate': round(sum(rates)/len(rates)), 'n': len(rates)})
+    return result[-8:]
+
 def fmt_time(seconds):
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
@@ -191,6 +215,8 @@ def fetch_segments(token, activities, max_acts=30):
         if (a.get('sport_type') or a.get('type', '')) in MOUNTAIN_TYPES
         and a.get('total_elevation_gain', 0) >= MIN_ACT_DPLUS
     ]
+    cutoff = (datetime.date.today() - datetime.timedelta(days=365)).isoformat()
+    mountain = [a for a in mountain if a.get('start_date_local', '')[:10] >= cutoff]
     mountain = sorted(mountain, key=lambda a: a.get('total_elevation_gain', 0), reverse=True)[:max_acts]
 
     segments = []
@@ -492,6 +518,25 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
   </div>
   {% endif %}
 
+<button onclick="toggleHist()" id="hist-btn" style="width:100%;background:var(--card2);border:1px solid var(--border);color:var(--muted);font-size:13px;padding:12px 14px;border-radius:10px;cursor:pointer;font-family:var(--font);margin-top:16px;display:flex;justify-content:space-between;align-items:center"><span>Evolución histórica D+/h</span><span id="hist-arrow">↓</span></button>
+<div id="hist-panel" style="display:none;margin-top:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 12px">
+  {% if history %}
+  {% for h in history %}
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+    <div style="width:68px;font-size:10px;color:var(--muted);flex-shrink:0;text-align:right">{{ h.period }}</div>
+    <div style="flex:1;background:var(--border);border-radius:3px;height:16px">
+      <div style="width:{{ ((h.rate / hist_max) * 100)|round }}%;background:var(--green);height:100%;border-radius:3px;min-width:3px"></div>
+    </div>
+    <div style="width:54px;font-size:11px;font-weight:600;color:var(--text);text-align:right">{{ h.rate }} m/h</div>
+    <div style="width:36px;font-size:10px;color:var(--sub)">{{ h.n }} act</div>
+  </div>
+  {% endfor %}
+  <div style="font-size:10px;color:var(--sub);margin-top:8px">Promedio D+/h por trimestre · actividades con +100m D+</div>
+  {% else %}
+  <p style="font-size:13px;color:var(--muted);text-align:center;padding:8px 0">Sin suficientes datos.</p>
+  {% endif %}
+</div>
+
   <div class="section-title">Calculadora</div>
   <div class="calc-card">
     <div class="slider-block">
@@ -566,6 +611,12 @@ function update(){
   document.getElementById('ref-note').textContent =
     dp+'m de D+ en '+dist+'km '+modeLabel+' -> '+fmt(tMins);
 }
+function toggleHist(){
+  const p=document.getElementById('hist-panel');
+  const open=p.style.display==='none';
+  p.style.display=open?'block':'none';
+  document.getElementById('hist-arrow').textContent=open?'↑':'↓';
+}
 document.getElementById('dplus').addEventListener('input',update);
 document.getElementById('dist').addEventListener('input',update);
 update();
@@ -621,6 +672,7 @@ def auth_callback():
     rates = analyze_from_segments(all_segs)
     segments = all_segs[:12]
 
+    history = compute_history(activities)
     session['athlete'] = {
         'firstname': athlete.get('firstname', 'Atleta'),
         'lastname':  athlete.get('lastname', ''),
@@ -629,6 +681,7 @@ def auth_callback():
     session['rates']    = rates
     session['stats']    = stats
     session['segments'] = segments
+    session['history']  = history
 
     return redirect('/resultado')
 
@@ -636,12 +689,16 @@ def auth_callback():
 def resultado():
     if 'rates' not in session:
         return redirect('/')
+    history  = session.get('history', [])
+    hist_max = max((h['rate'] for h in history), default=500)
     return render_template_string(
         RESULT,
         athlete=session['athlete'],
         rates=session['rates'],
         stats=session['stats'],
         segments=session.get('segments', []),
+        history=history,
+        hist_max=hist_max,
     )
 
 if __name__ == '__main__':
