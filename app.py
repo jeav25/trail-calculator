@@ -112,7 +112,8 @@ def compute_history(activities):
         if not date_str or dplus < 100 or time_s < 600: continue
         try:
             d = datetime.date.fromisoformat(date_str)
-            q = f"{d.year}-Q{(d.month-1)//3 + 1}"
+            QN = ['Ene-Mar','Abr-Jun','Jul-Sep','Oct-Dic'][(d.month-1)//3]
+            q = f"{d.year} {QN}"
             rate = round(dplus / (time_s / 3600))
             if 50 <= rate <= 1500:
                 quarters[q].append(rate)
@@ -520,6 +521,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
 
 <button onclick="toggleHist()" id="hist-btn" style="width:100%;background:var(--card2);border:1px solid var(--border);color:var(--muted);font-size:13px;padding:12px 14px;border-radius:10px;cursor:pointer;font-family:var(--font);margin-top:16px;display:flex;justify-content:space-between;align-items:center"><span>Evolución histórica D+/h</span><span id="hist-arrow">↓</span></button>
 <div id="hist-panel" style="display:none;margin-top:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 12px">
+  <div style="font-size:10px;color:var(--sub);margin-bottom:12px">Solo actividades de trail · promedio D+/h por trimestre</div>
   {% if history %}
   {% for h in history %}
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
@@ -531,7 +533,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
     <div style="width:36px;font-size:10px;color:var(--sub)">{{ h.n }} act</div>
   </div>
   {% endfor %}
-  <div style="font-size:10px;color:var(--sub);margin-top:8px">Promedio D+/h por trimestre · solo actividades de trail</div>
+
   {% else %}
   <p style="font-size:13px;color:var(--muted);text-align:center;padding:8px 0">Sin suficientes datos.</p>
   {% endif %}
