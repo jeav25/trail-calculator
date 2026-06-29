@@ -105,7 +105,7 @@ def compute_history(activities):
     quarters = defaultdict(list)
     for a in activities:
         sport = a.get('sport_type') or a.get('type', '')
-        if sport not in ANALYZE_TYPES: continue
+        if sport != 'TrailRun': continue
         dplus  = a.get('total_elevation_gain', 0)
         time_s = a.get('moving_time', 0)
         date_str = a.get('start_date_local', '')[:10]
@@ -531,7 +531,7 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
     <div style="width:36px;font-size:10px;color:var(--sub)">{{ h.n }} act</div>
   </div>
   {% endfor %}
-  <div style="font-size:10px;color:var(--sub);margin-top:8px">Promedio D+/h por trimestre · actividades con +100m D+</div>
+  <div style="font-size:10px;color:var(--sub);margin-top:8px">Promedio D+/h por trimestre · solo actividades de trail</div>
   {% else %}
   <p style="font-size:13px;color:var(--muted);text-align:center;padding:8px 0">Sin suficientes datos.</p>
   {% endif %}
