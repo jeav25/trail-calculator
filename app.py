@@ -481,63 +481,6 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
     </div>
   </div>
 
-  {% if segments %}
-  <div class="section-title">Tus segmentos de referencia (ritmo carrera)</div>
-  <div class="seg-wrap">
-  <table class="seg-table">
-    <thead>
-      <tr>
-        <th>Segmento</th>
-        <th>Dist.</th>
-        <th>D+</th>
-        <th>Pend.</th>
-        <th>Tiempo</th>
-        <th>D+/hora</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for seg in segments %}
-    <tr>
-      <td>
-        <div class="seg-name-cell">{{ seg.name }}</div>
-        <div class="seg-date-cell">{{ seg.date }}</div>
-      </td>
-      <td>{{ seg.dist_km }} km</td>
-      <td>+{{ seg.dplus }} m</td>
-      <td>{{ seg.slope }}%</td>
-      <td><strong>{{ seg.time_fmt }}</strong></td>
-      <td><strong class="
-        {%- if seg.rate >= 900 %}rate-hot
-        {%- elif seg.rate >= 750 %}rate-warm
-        {%- elif seg.rate >= 600 %}rate-cool
-        {%- else %}rate-cold
-        {%- endif %}">{{ seg.rate }} m/h</strong></td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% endif %}
-
-<button onclick="toggleHist()" id="hist-btn" style="width:100%;background:var(--card2);border:1px solid var(--border);color:var(--muted);font-size:13px;padding:12px 14px;border-radius:10px;cursor:pointer;font-family:var(--font);margin-top:16px;display:flex;justify-content:space-between;align-items:center"><span>Evolución histórica D+/h</span><span id="hist-arrow">↓</span></button>
-<div id="hist-panel" style="display:none;margin-top:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 12px">
-  <div style="font-size:10px;color:var(--sub);margin-bottom:12px">Solo actividades de trail · promedio D+/h por trimestre</div>
-  {% if history %}
-  {% for h in history %}
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
-    <div style="width:68px;font-size:10px;color:var(--muted);flex-shrink:0;text-align:right">{{ h.period }}</div>
-    <div style="flex:1;background:var(--border);border-radius:3px;height:16px">
-      <div style="width:{{ ((h.rate / hist_max) * 100)|round }}%;background:var(--green);height:100%;border-radius:3px;min-width:3px"></div>
-    </div>
-    <div style="width:54px;font-size:11px;font-weight:600;color:var(--text);text-align:right">{{ h.rate }} m/h</div>
-    <div style="width:36px;font-size:10px;color:var(--sub)">{{ h.n }} act</div>
-  </div>
-  {% endfor %}
-
-  {% else %}
-  <p style="font-size:13px;color:var(--muted);text-align:center;padding:8px 0">Sin suficientes datos.</p>
-  {% endif %}
-</div>
 
   <div class="section-title">Calculadora</div>
   <div class="calc-card">
@@ -623,6 +566,63 @@ document.getElementById('dplus').addEventListener('input',update);
 document.getElementById('dist').addEventListener('input',update);
 update();
 </script>
+  {% if segments %}
+  <div class="section-title">Tus segmentos de referencia (ritmo carrera)</div>
+  <div class="seg-wrap">
+  <table class="seg-table">
+    <thead>
+      <tr>
+        <th>Segmento</th>
+        <th>Dist.</th>
+        <th>D+</th>
+        <th>Pend.</th>
+        <th>Tiempo</th>
+        <th>D+/hora</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for seg in segments %}
+    <tr>
+      <td>
+        <div class="seg-name-cell">{{ seg.name }}</div>
+        <div class="seg-date-cell">{{ seg.date }}</div>
+      </td>
+      <td>{{ seg.dist_km }} km</td>
+      <td>+{{ seg.dplus }} m</td>
+      <td>{{ seg.slope }}%</td>
+      <td><strong>{{ seg.time_fmt }}</strong></td>
+      <td><strong class="
+        {%- if seg.rate >= 900 %}rate-hot
+        {%- elif seg.rate >= 750 %}rate-warm
+        {%- elif seg.rate >= 600 %}rate-cool
+        {%- else %}rate-cold
+        {%- endif %}">{{ seg.rate }} m/h</strong></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+<button onclick="toggleHist()" id="hist-btn" style="width:100%;background:var(--card2);border:1px solid var(--border);color:var(--muted);font-size:13px;padding:12px 14px;border-radius:10px;cursor:pointer;font-family:var(--font);margin-top:16px;display:flex;justify-content:space-between;align-items:center"><span>Evolución histórica D+/h</span><span id="hist-arrow">↓</span></button>
+<div id="hist-panel" style="display:none;margin-top:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 12px">
+  <div style="font-size:10px;color:var(--sub);margin-bottom:12px">Solo actividades de trail · promedio D+/h por trimestre</div>
+  {% if history %}
+  {% for h in history %}
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+    <div style="width:68px;font-size:10px;color:var(--muted);flex-shrink:0;text-align:right">{{ h.period }}</div>
+    <div style="flex:1;background:var(--border);border-radius:3px;height:16px">
+      <div style="width:{{ ((h.rate / hist_max) * 100)|round }}%;background:var(--green);height:100%;border-radius:3px;min-width:3px"></div>
+    </div>
+    <div style="width:54px;font-size:11px;font-weight:600;color:var(--text);text-align:right">{{ h.rate }} m/h</div>
+    <div style="width:36px;font-size:10px;color:var(--sub)">{{ h.n }} act</div>
+  </div>
+  {% endfor %}
+
+  {% else %}
+  <p style="font-size:13px;color:var(--muted);text-align:center;padding:8px 0">Sin suficientes datos.</p>
+  {% endif %}
+</div>
 </body>
 </html>"""
 
