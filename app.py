@@ -235,6 +235,7 @@ def fetch_segments(token, activities, max_acts=30):
                     'name':     name,
                     'date':     date,
                     'is_race':  act.get('workout_type') == 1,
+                    'activity_dist_km': round(act.get('distance', 0) / 1000, 1),
                     'dplus':    c['dplus'],
                     'dist_km':  c['dist_km'],
                     'slope':    c['slope'],
@@ -570,8 +571,8 @@ document.getElementById('dplus').addEventListener('input',update);
 document.getElementById('dist').addEventListener('input',update);
 update();
 </script>
-  {% if segments %}
-  <div class="section-title">Tus segmentos de referencia (ritmo carrera)</div>
+  <div class="section-title">Segmentos de carrera</div>
+{% if seg_race %}
   <div class="seg-wrap">
   <table class="seg-table">
     <thead>
@@ -585,7 +586,7 @@ update();
       </tr>
     </thead>
     <tbody>
-    {% for seg in segments %}
+    {% for seg in seg_race %}
     <tr>
       <td>
         <div class="seg-name-cell">{{ seg.name }}</div>
@@ -606,7 +607,83 @@ update();
     </tbody>
   </table>
   </div>
-  {% endif %}
+{% endif %}
+
+<div class="section-title">Entrenamientos cortos (&lt;10 km)</div>
+{% if seg_short %}
+  <div class="seg-wrap">
+  <table class="seg-table">
+    <thead>
+      <tr>
+        <th>Segmento</th>
+        <th>Dist.</th>
+        <th>D+</th>
+        <th>Pend.</th>
+        <th>Tiempo</th>
+        <th>D+/hora</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for seg in seg_short %}
+    <tr>
+      <td>
+        <div class="seg-name-cell">{{ seg.name }}</div>
+        <div class="seg-date-cell">{{ seg.date }}</div>
+      </td>
+      <td>{{ seg.dist_km }} km</td>
+      <td>+{{ seg.dplus }} m</td>
+      <td>{{ seg.slope }}%</td>
+      <td><strong>{{ seg.time_fmt }}</strong></td>
+      <td><strong class="
+        {%- if seg.rate >= 900 %}rate-hot
+        {%- elif seg.rate >= 750 %}rate-warm
+        {%- elif seg.rate >= 600 %}rate-cool
+        {%- else %}rate-cold
+        {%- endif %}">{{ seg.rate }} m/h</strong></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endif %}
+
+<div class="section-title">Entrenamientos largos (&ge;10 km)</div>
+{% if seg_long %}
+  <div class="seg-wrap">
+  <table class="seg-table">
+    <thead>
+      <tr>
+        <th>Segmento</th>
+        <th>Dist.</th>
+        <th>D+</th>
+        <th>Pend.</th>
+        <th>Tiempo</th>
+        <th>D+/hora</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for seg in seg_long %}
+    <tr>
+      <td>
+        <div class="seg-name-cell">{{ seg.name }}</div>
+        <div class="seg-date-cell">{{ seg.date }}</div>
+      </td>
+      <td>{{ seg.dist_km }} km</td>
+      <td>+{{ seg.dplus }} m</td>
+      <td>{{ seg.slope }}%</td>
+      <td><strong>{{ seg.time_fmt }}</strong></td>
+      <td><strong class="
+        {%- if seg.rate >= 900 %}rate-hot
+        {%- elif seg.rate >= 750 %}rate-warm
+        {%- elif seg.rate >= 600 %}rate-cool
+        {%- else %}rate-cold
+        {%- endif %}">{{ seg.rate }} m/h</strong></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endif %}
 
 <button onclick="toggleHist()" id="hist-btn" style="width:100%;background:var(--card2);border:1px solid var(--border);color:var(--muted);font-size:13px;padding:12px 14px;border-radius:10px;cursor:pointer;font-family:var(--font);margin-top:16px;display:flex;justify-content:space-between;align-items:center"><span>Evolución histórica D+/h</span><span id="hist-arrow">↓</span></button>
 <div id="hist-panel" style="display:none;margin-top:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 12px">
@@ -686,7 +763,7 @@ def auth_callback():
         race_data_ok = False
     rates_train = analyze_from_segments(all_segs)
     rates       = rates_train
-    segments    = all_segs[:12]
+    segments    = all_segs[:30]
 
     history = compute_history(activities)
     session['athlete'] = {
@@ -713,12 +790,18 @@ def resultado():
     rates_race   = session.get('rates_race',   session.get('rates', {}))
     rates_train  = session.get('rates_train',  session.get('rates', {}))
     race_data_ok = session.get('race_data_ok', True)
+    all_segs_stored = session.get('segments', [])
+    seg_race  = [s for s in all_segs_stored if s.get('is_race')][:6]
+    seg_short = [s for s in all_segs_stored if not s.get('is_race') and s.get('activity_dist_km', 0) < 10][:6]
+    seg_long  = [s for s in all_segs_stored if not s.get('is_race') and s.get('activity_dist_km', 0) >= 10][:6]
     return render_template_string(
         RESULT,
         athlete=session['athlete'],
         rates=session['rates'],
         stats=session['stats'],
-        segments=session.get('segments', []),
+        seg_race=seg_race,
+        seg_short=seg_short,
+        seg_long=seg_long,
         history=history,
         hist_max=hist_max,
         rates_race=rates_race,
