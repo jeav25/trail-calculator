@@ -234,6 +234,7 @@ def fetch_segments(token, activities, max_acts=30):
                 segments.append({
                     'name':     name,
                     'date':     date,
+                    'is_race':  act.get('workout_type') == 1,
                     'dplus':    c['dplus'],
                     'dist_km':  c['dist_km'],
                     'slope':    c['slope'],
@@ -503,7 +504,8 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
       <button class="mode-btn" onclick="setMode('train',this)">Entrena.</button>
       <button class="mode-btn" onclick="setMode('easy',this)">Suave/Z2</button>
     </div>
-    <div class="results-grid">
+    {% if not race_data_ok %}<div style="font-size:11px;color:#f59e0b;margin-bottom:10px;text-align:center;padding:6px 10px;background:#2d2510;border-radius:8px">Sin carreras etiquetadas en Strava &middot; Modo carrera usa tus mejores esfuerzos</div>{% endif %}
+<div class="results-grid">
       <div class="result-card">
         <div class="result-label">Pendiente</div>
         <div class="result-val" id="grade-out">18%</div>
@@ -527,7 +529,8 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
 </div>
 
 <script>
-const RATES = { s:{{ rates.s }}, m:{{ rates.m }}, l:{{ rates.l }}, xl:{{ rates.xl }} };
+const RATES_RACE  = { s:{{ rates_race.s }},  m:{{ rates_race.m }},  l:{{ rates_race.l }},  xl:{{ rates_race.xl }} };
+const RATES_TRAIN = { s:{{ rates_train.s }}, m:{{ rates_train.m }}, l:{{ rates_train.l }}, xl:{{ rates_train.xl }} };
 const MULT  = { race:1.0, train:0.82, easy:0.67 };
 let mode = 'race';
 function cat(d){ return d<2?'s':d<5?'m':d<8?'l':'xl'; }
@@ -547,7 +550,8 @@ function update(){
   document.getElementById('dplus-out').textContent = dp+' m';
   document.getElementById('dist-out').textContent  = dist.toFixed(1)+' km';
   const grade = Math.round(dp / (dist * 10));
-  const rate  = Math.round(RATES[cat(dist)]*MULT[mode]);
+  const baseRates = mode==='race' ? RATES_RACE : RATES_TRAIN;
+const rate = Math.round(baseRates[cat(dist)]*MULT[mode]);
   const tMins = (dp/rate)*60;
   document.getElementById('grade-out').textContent = grade+'%';
   document.getElementById('rate-out').textContent  = rate+' m/h';
@@ -670,9 +674,19 @@ def auth_callback():
 
     activities = fetch_activities(token)
     _, stats = analyze(activities)
-    all_segs = fetch_segments(token, activities)
-    rates = analyze_from_segments(all_segs)
-    segments = all_segs[:12]
+    all_segs    = fetch_segments(token, activities)
+    race_segs   = [s for s in all_segs if s.get('is_race')]
+    if len(race_segs) >= 3:
+        rates_race   = analyze_from_segments(race_segs)
+        race_data_ok = True
+    else:
+        top_n = max(3, len(all_segs) // 4)
+        top   = sorted(all_segs, key=lambda s: s['rate'], reverse=True)[:top_n]
+        rates_race   = analyze_from_segments(top)
+        race_data_ok = False
+    rates_train = analyze_from_segments(all_segs)
+    rates       = rates_train
+    segments    = all_segs[:12]
 
     history = compute_history(activities)
     session['athlete'] = {
@@ -682,8 +696,11 @@ def auth_callback():
     }
     session['rates']    = rates
     session['stats']    = stats
-    session['segments'] = segments
-    session['history']  = history
+    session['segments']     = segments
+    session['history']      = history
+    session['rates_race']   = rates_race
+    session['rates_train']  = rates_train
+    session['race_data_ok'] = race_data_ok
 
     return redirect('/resultado')
 
@@ -691,8 +708,11 @@ def auth_callback():
 def resultado():
     if 'rates' not in session:
         return redirect('/')
-    history  = session.get('history', [])
-    hist_max = max((h['rate'] for h in history), default=500)
+    history      = session.get('history', [])
+    hist_max     = max((h['rate'] for h in history), default=500)
+    rates_race   = session.get('rates_race',   session.get('rates', {}))
+    rates_train  = session.get('rates_train',  session.get('rates', {}))
+    race_data_ok = session.get('race_data_ok', True)
     return render_template_string(
         RESULT,
         athlete=session['athlete'],
@@ -701,6 +721,9 @@ def resultado():
         segments=session.get('segments', []),
         history=history,
         hist_max=hist_max,
+        rates_race=rates_race,
+        rates_train=rates_train,
+        race_data_ok=race_data_ok,
     )
 
 if __name__ == '__main__':
